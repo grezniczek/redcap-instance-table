@@ -41,12 +41,16 @@
             "description": "Override default choices for page sizing: specify integer default page size, or -1 for 'All'"
         },
         {
+            "tag": "@INSTANCETABLE_FILTER",
+            "description": "Use <code>@INSTANCETABLE_FILTER='[v]=1'</code> to specify a logic expression to show only instances that match the filter expression. You can pipe in fields from the instrument the instance table is on by using curly braces: <code>@INSTANCETABLE_FILTER='[field_on_repeating_form]={field_on_this_form}'</code>. When you use this, both the <code>@INSTANCETABLE_REF</code> <u>and</u> <code>@INSTANCETABLE_REF_SOURCE</code> must be set in order for the \"+ Add new\" button to work."
+        },
+        {
             "tag": "@INSTANCETABLE_REF",
             "description": "Where you have an instance table on a repeating form that is referencing another repeating form, use <code>@INSTANCETABLE_REF=fieldname</code> to have the instances filtered to show only those where the current instance number is saved in a field on the referenced repeating form. For example, an instance table in a repeating 'Visit' form may be configured to show only instances of the repeating 'Medication' form where the current Visit instance is selected in the visitref field on the Medication form: <code>@INSTANCETABLE @INSTANCETABLE_REF=visitref</code>."
         },
         {
-            "tag": "@INSTANCETABLE_FILTER",
-            "description": "Use <code>@INSTANCETABLE_FILTER='[v]=1'</code> to specify a logic expression to show only instances that match the filter expression."
+            "tag": "@INSTANCETABLE_REF_SOURCE",
+            "description": "When you use <code>@INSTANCETABLE_REF</code>, the default link between sets of repeating fields is the instance number. Use this action tag to have another field from the instrument the instance table is on to serve as this linking element. The instrument must have been saved before the \"+ Add new\" button becomes available. While a saved instrument exists that references the field's value, the field becomes read only (i.e., it behaves as if the <code>@READONLY</code> action tag was applied."
         },
         {
             "tag": "@INSTANCETABLE_ADDBTNLABEL",
