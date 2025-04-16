@@ -25,10 +25,11 @@ If project is longitudinal, use `@INSTANCETABLE=event_name:form_name` to specify
 * `@INSTANCETABLE_HIDEINSTANCECOL`: Hide the "#" column containing instance numbers.
 * `@INSTANCETABLE_VARLIST=rptfrmvar3,rptfrmvar1,rptfrmvar6,rptfrm_complete`: Include only the variables from the repeating form that appear in the comma-separated list. Also (from v1.5.1) can be used to set the order of columns in the table rather than using the order of fields from the form. (An alternative to using `@INSTANCETABLE_HIDE` for repeating form variables. Takes precedence over `@INSTANCETABLE_HIDE`  where both used from v1.5.1.)
 * `@INSTANCETABLE_REF=fieldname`: Where you have an instance table on a repeating form - i.e. is referencing another repeating form - you can have the instances filtered to show only those where the current instance number is saved in a field on the other form.<br>For example, an instance table in a repeating "Visit" form may be configured to show only instances of the repeating "Medication" form where the current Visit instance is selected in the `visitref` field on the Medication form: `@INSTANCETABLE @INSTANCETABLE_REF=visitref`.<br>Note that if you use `@INSTANCETABLE_REF` for an instance table on a non-repeating form the filter will default to `<ref field>=1`.<br>New instances created by clicking the "Add New" button below the instance table will have the current visit instance pre-selected.
-*  `@INSTANCETABLE_FILTER='[v]="1"'`: Specify a logic expression to show only instances that match the filter expression. 
-*  `@INSTANCETABLE_ADDBTNLABEL='Button Label'`: Specify an alternative label for the "Add New" button.
-*  `@INSTANCETABLE_HIDECHOICEVALUES`: Suppress the display of choice field values and show only choice labels.
-*  `@INSTANCETABLE_HIDEFORMSTATUS`: Suppress display of the form status field in data entry view. (The form status field is always suppressed in survey mode.)
+* `@INSTANCETABLE_REF_SOURCE`: When you use `@INSTANCETABLE_REF`, the default link between sets of repeating fields is the instance number. Use this action tag to have another field from the instrument the instance table is on to serve as this linking element. The instrument must have been saved before the "Add New" button becomes available. While a saved instrument exists that references the field's value, the field becomes read only (i.e., it behaves as if the `@READONLY` action tag was applied.
+* `@INSTANCETABLE_FILTER='[v]="1"'`: Specify a logic expression to show only instances that match the filter expression. 
+* `@INSTANCETABLE_ADDBTNLABEL='Button Label'`: Specify an alternative label for the "Add New" button.
+* `@INSTANCETABLE_HIDECHOICEVALUES`: Suppress the display of choice field values and show only choice labels.
+* `@INSTANCETABLE_HIDEFORMSTATUS`: Suppress display of the form status field in data entry view. (The form status field is always suppressed in survey mode.)
 
 ### Tags Used for Fields on a Repeating Form 
 * `@INSTANCETABLE_HIDE`: Ignore this field in instance all tables.
