@@ -49,12 +49,17 @@ class InstanceTable extends AbstractExternalModule
         const ACTION_TAG_PREFILL = '@INSTANCETABLE[-_]PREFILL';
         const ADD_NEW_BTN_YSHIFT = '0px';
         const MODULE_VARNAME = 'MCRI_InstanceTable';
+        const FDL_REDIRECT_CONTEXT_SESSION_KEY = 'extmod_instance_table_fdl_redirect_context';
+        const FDL_REDIRECT_CONTEXT_TTL = 120;
 
         const ERROR_NOT_REPEATING_CLASSIC = '<div class="red">ERROR: "%s" is not a repeating form. Contact the project designer.';
         const ERROR_NOT_REPEATING_LONG = '<div class="red">ERROR: "%s" is not a repeating form for event "%s". Contact the project designer.';
         const ERROR_NO_VIEW_ACCESS = '<div class="yellow">You do not have permission to view this form\'s data.';
+        const ADD_NEW_FDL_BLOCKED_MESSAGE = 'New instance creation currently not possible. You may have to save this form first.';
         const REPLQUOTE_SINGLE = 'REPLQUOTE_SINGLE';
         const REPLQUOTE_DOUBLE = 'REPLQUOTE_DOUBLE';
+
+        protected $restoredResolvedAddNewContext = false;
 
         /**
          * redcap_every_page_top
@@ -64,11 +69,15 @@ class InstanceTable extends AbstractExternalModule
          * @param type $project_id
          */
         public function redcap_every_page_top($project_id) {
-                if (PAGE==='DataEntry/record_home.php' && isset($_GET['id']) && isset($_SESSION['extmod_instance_table_closerec_home']) && $_GET['id']==$_SESSION['extmod_instance_table_closerec_home']) {
+                $closeRecordHomeForFdlRedirect = $this->isFdlRedirectContextForRecordHome($project_id);
+                if (PAGE==='DataEntry/record_home.php' && isset($_GET['id']) && ((isset($_SESSION['extmod_instance_table_closerec_home']) && $_GET['id']==$_SESSION['extmod_instance_table_closerec_home']) || $closeRecordHomeForFdlRedirect)) {
                         ?>
                         <script type="text/javascript">/* EM Instance Table */ window.close();</script>
                         <?php
                         unset($_SESSION['extmod_instance_table_closerec_home']);
+                        if ($closeRecordHomeForFdlRedirect) {
+                                $this->clearFdlRedirectContext();
+                        }
                 } else if (PAGE==='DataEntry/index.php' && isset($_GET['id']) && isset($_SESSION['extmod_instance_table_popup_save']) && $_GET['id']==$_SESSION['extmod_instance_table_popup_save']) {
                         ?>
                         <script type="text/javascript">/* EM Instance Table */ window.location.href = window.location.href+'&extmod_instance_table=1';</script>
@@ -76,6 +85,7 @@ class InstanceTable extends AbstractExternalModule
                 }
                 
                 unset($_SESSION['extmod_instance_table_popup_save']);
+                $this->clearFdlRedirectContextIfCurrentDataEntryPageRendered($project_id);
                 
                 if (PAGE==='DataEntry/index.php' && isset($_GET['id']) && isset($_GET['page'])) {
                         global $Proj;
@@ -522,10 +532,80 @@ class InstanceTable extends AbstractExternalModule
                 $html.='</table>';
 
                 if ($canEdit) {
-                        $disabled = (\Records::recordExists($this->Proj->project_id, $this->record)) ? '' : 'disabled="disabled" title="Record not yet saved"';
-                        $html.='<div style="position:relative;top:'.self::ADD_NEW_BTN_YSHIFT.';margin-bottom:5px;"><button '.$disabled.' type="button" class="btn btn-sm btn-success " onclick="'.self::MODULE_VARNAME.'.addNewInstance(\''.$this->record.'\','.$eventId.',\''.$formName.'\',\''.$instrumentField.'\',\''.$linkField.'\',\''.$linkValue.'\');"><span class="fas fa-plus-circle mr-1" aria-hidden="true"></span>'.$btnLabel.'</button></div>'; // Add new
+                        $recordExists = \Records::recordExists($this->Proj->project_id, $this->record);
+                        $disabled = '';
+                        $title = '';
+                        $onclick = ' onclick="'.self::MODULE_VARNAME.'.addNewInstance(\''.$this->record.'\','.$eventId.',\''.$formName.'\',\''.$instrumentField.'\',\''.$linkField.'\',\''.$linkValue.'\');"';
+                        $addNewBlockedMessage = '';
+
+                        if (!$recordExists) {
+                                $disabled = ' disabled="disabled"';
+                                $title = ' title="Record not yet saved"';
+                        } else if (!$this->canAddNewInstanceByFormDisplayLogic($eventId, $formName)) {
+                                $disabled = ' disabled="disabled"';
+                                $title = ' title="'.$this->escape(self::ADD_NEW_FDL_BLOCKED_MESSAGE).'"';
+                                $onclick = '';
+                                $addNewBlockedMessage = '<div class="yellow small ms-1" style="margin-top:5px;display:inline-block;">'.self::ADD_NEW_FDL_BLOCKED_MESSAGE.'</div>';
+                        }
+
+                        $html.='<div style="position:relative;top:'.self::ADD_NEW_BTN_YSHIFT.';margin-bottom:5px;"><button'.$disabled.$title.' type="button" class="btn btn-sm btn-success "'.$onclick.'><span class="fas fa-plus-circle mr-1" aria-hidden="true"></span>'.$btnLabel.'</button>'.$addNewBlockedMessage.'</div>'; // Add new
                 }
                 return $html;
+        }
+
+        protected function canAddNewInstanceByFormDisplayLogic($eventId, $formName) {
+                if (!class_exists('\FormDisplayLogic') || !isset($this->Proj)) {
+                        return true;
+                }
+
+                if ($this->Proj->isRepeatingForm($eventId, $formName)) {
+                        if (!method_exists('\FormDisplayLogic', 'checkAddNewRepeatingFormInstanceAllowed')) {
+                                return true;
+                        }
+                        try {
+                                return \FormDisplayLogic::checkAddNewRepeatingFormInstanceAllowed($this->Proj->project_id, $this->record, $eventId, $formName);
+                        } catch (\Throwable $e) {
+                                return true;
+                        }
+                }
+
+                if ($this->Proj->isRepeatingEvent($eventId)) {
+                        if (!method_exists('\FormDisplayLogic', 'getEventFormsState')) {
+                                return true;
+                        }
+                        try {
+                                $nextInstance = $this->getNextInstanceNumber($this->record, $eventId, $formName);
+                                $formsState = \FormDisplayLogic::getEventFormsState($this->Proj->project_id, $this->record, $eventId, $nextInstance);
+                                return !empty($formsState[$this->record][$eventId][$formName]);
+                        } catch (\Throwable $e) {
+                                return true;
+                        }
+                }
+
+                return true;
+        }
+
+        protected function getNextInstanceNumber($record, $eventId, $formName) {
+                $formKey = ($this->Proj->isRepeatingEvent($eventId))
+                        ? ''        // repeating event - empty string key
+                        : $formName; // repeating form  - form name key
+
+                $recordData = REDCap::getData([
+                    'return_format' => 'array',
+                    'records' => $record,
+                    'forms' => $formName.'_complete',
+                    'events' => $eventId,
+                ]);
+
+                if (array_key_exists($record,$recordData) &&
+                        array_key_exists('repeat_instances',$recordData[$record]) &&
+                        array_key_exists($eventId, $recordData[$record]['repeat_instances']) &&
+                        array_key_exists($formKey, $recordData[$record]['repeat_instances'][$eventId]) ) {
+                    $currentInstances = array_keys($recordData[$record]['repeat_instances'][$eventId][$formKey]);
+                    return (empty($currentInstances)) ? 1 : 1 + max($currentInstances); #87 use max() not end()
+                }
+
+                return 1;
         }
         
         public function getInstanceData($record, $event, $form, $fields, $filter, $formViewContext, $includeFormStatus=true, $hideChoiceValues=false) {
@@ -1133,38 +1213,166 @@ var <?php echo self::MODULE_VARNAME;?> = (function(window, document, $, app_path
          * @param type $project_id
          */
         public function redcap_every_page_before_render($project_id) {
+            $this->restoreFdlRedirectContext($project_id);
+            $resolvedNewInstance = false;
+
             if (isset($_POST['extmod_instance_table_popup_save'])) {
                 $_SESSION['extmod_instance_table_popup_save'] = $_POST['extmod_instance_table_popup_save'];
             }
             if (isset($_POST['extmod_instance_table_closerec_home'])) {
                 $_SESSION['extmod_instance_table_closerec_home'] = $_POST['extmod_instance_table_closerec_home'];
             }
-            if (PAGE==='DataEntry/index.php' && isset($_GET['extmod_instance_table']) && isset($_GET['extmod_instance_table_add_new']) && !is_null($project_id) && isset(($_GET['event_id']))) {
+            if (PAGE==='DataEntry/index.php' && isset($_GET['extmod_instance_table']) && isset($_GET['extmod_instance_table_add_new']) && !is_null($project_id) && isset($_GET['id']) && isset($_GET['event_id']) && isset($_GET['page']) && !$this->restoredResolvedAddNewContext) {
                 global $Proj;
                 $this->Proj = $Proj;
                 $this->isSurvey = false;
                 // adding new instance - read current max and redirect to + 1
-                $formKey = ($this->Proj->isRepeatingEvent($_GET['event_id']))
-                        ? ''             // repeating event - empty string key
-                        : $_GET['page']; // repeating form  - form name key
+                $_GET['instance'] = $this->getNextInstanceNumber($_GET['id'], $_GET['event_id'], $_GET['page']);
+                $resolvedNewInstance = true;
+            } else if ($this->restoredResolvedAddNewContext) {
+                $resolvedNewInstance = true;
+            }
 
-                $recordData = REDCap::getData([
-                    'return_format' => 'array',
-                    'records' => $_GET['id'],
-                    'forms' => $_GET['page'].'_complete',
-                    'events' => $_GET['event_id'],
-                ]);
+            if (PAGE==='DataEntry/index.php' && isset($_GET['extmod_instance_table']) && !is_null($project_id) && isset($_GET['id']) && isset($_GET['event_id']) && isset($_GET['page']) && isset($_GET['instance'])) {
+                $this->setFdlRedirectContext($project_id, $resolvedNewInstance);
+            }
+        }
 
-                if (array_key_exists($_GET['id'],$recordData) &&
-                        array_key_exists('repeat_instances',$recordData[$_GET['id']]) &&
-                        array_key_exists($_GET['event_id'], $recordData[$_GET['id']]['repeat_instances']) &&
-                        array_key_exists($formKey, $recordData[$_GET['id']]['repeat_instances'][$_GET['event_id']]) ) {
-                    $currentInstances = array_keys($recordData[$_GET['id']]['repeat_instances'][$_GET['event_id']][$formKey]);
-                    $_GET['instance'] = (is_null($currentInstances)) ? 1 : 1 + max($currentInstances); #87 use max() not end()
-                } else {
-                    $_GET['instance'] = 1;
+        protected function restoreFdlRedirectContext($project_id) {
+            $this->restoredResolvedAddNewContext = false;
+
+            if (PAGE!=='DataEntry/index.php' || is_null($project_id) || isset($_GET['extmod_instance_table'])) {
+                return;
+            }
+
+            $context = $this->getFdlRedirectContext($project_id);
+            if ($context===null || !$this->isFdlRedirectContextForCurrentDataEntryRequest($context)) {
+                return;
+            }
+
+            foreach ($context['get'] as $key => $value) {
+                if (!isset($_GET[$key])) {
+                    $_GET[$key] = $value;
                 }
             }
+
+            if (!empty($context['add_new']) && !empty($context['resolved_instance'])) {
+                $this->restoredResolvedAddNewContext = true;
+            }
+        }
+
+        protected function setFdlRedirectContext($project_id, $resolvedNewInstance) {
+            $getParams = array();
+            $coreParams = array(
+                'pid' => true,
+                'id' => true,
+                'event_id' => true,
+                'page' => true,
+                'instance' => true,
+            );
+
+            foreach ($_GET as $key => $value) {
+                if (isset($coreParams[$key]) || is_array($value)) {
+                    continue;
+                }
+                $getParams[$key] = $value;
+            }
+
+            $getParams['extmod_instance_table'] = '1';
+            if (isset($_GET['extmod_instance_table_add_new'])) {
+                $getParams['extmod_instance_table_add_new'] = '1';
+            }
+
+            $_SESSION[self::FDL_REDIRECT_CONTEXT_SESSION_KEY] = array(
+                'created_at' => time(),
+                'project_id' => (string)$project_id,
+                'record' => (string)$_GET['id'],
+                'event_id' => (string)$_GET['event_id'],
+                'page' => (string)$_GET['page'],
+                'instance' => (string)$_GET['instance'],
+                'get' => $getParams,
+                'add_new' => isset($_GET['extmod_instance_table_add_new']),
+                'resolved_instance' => $resolvedNewInstance,
+            );
+        }
+
+        protected function getFdlRedirectContext($project_id) {
+            if (!isset($_SESSION[self::FDL_REDIRECT_CONTEXT_SESSION_KEY]) || !is_array($_SESSION[self::FDL_REDIRECT_CONTEXT_SESSION_KEY])) {
+                return null;
+            }
+
+            $context = $_SESSION[self::FDL_REDIRECT_CONTEXT_SESSION_KEY];
+            if (!isset($context['created_at']) || (time() - $context['created_at']) > self::FDL_REDIRECT_CONTEXT_TTL) {
+                $this->clearFdlRedirectContext();
+                return null;
+            }
+
+            if (!isset($context['project_id']) || (string)$context['project_id'] !== (string)$project_id) {
+                return null;
+            }
+
+            if (!isset($context['get']) || !is_array($context['get'])) {
+                return null;
+            }
+
+            return $context;
+        }
+
+        protected function clearFdlRedirectContext() {
+            unset($_SESSION[self::FDL_REDIRECT_CONTEXT_SESSION_KEY]);
+        }
+
+        protected function clearFdlRedirectContextIfCurrentDataEntryPageRendered($project_id) {
+            if (PAGE!=='DataEntry/index.php' || is_null($project_id)) {
+                return;
+            }
+
+            $context = $this->getFdlRedirectContext($project_id);
+            if ($context!==null && $this->isFdlRedirectContextForCurrentDataEntryRequest($context)) {
+                $this->clearFdlRedirectContext();
+            }
+        }
+
+        protected function isFdlRedirectContextForRecordHome($project_id) {
+            if (PAGE!=='DataEntry/record_home.php' || is_null($project_id) || !isset($_GET['id'])) {
+                return false;
+            }
+
+            $context = $this->getFdlRedirectContext($project_id);
+            return $context!==null && isset($context['record']) && (string)$context['record'] === (string)$_GET['id'];
+        }
+
+        protected function isFdlRedirectContextForCurrentDataEntryRequest($context) {
+            if (!isset($_GET['id']) || !isset($_GET['event_id']) || !isset($_GET['instance'])) {
+                return false;
+            }
+
+            if (!isset($context['record']) || !isset($context['event_id']) || !isset($context['instance'])) {
+                return false;
+            }
+
+            if ((string)$context['record'] !== (string)$_GET['id'] || (string)$context['event_id'] !== (string)$_GET['event_id']) {
+                return false;
+            }
+
+            if ((string)$context['instance'] === (string)$_GET['instance']) {
+                return true;
+            }
+
+            return (string)$_GET['instance'] === '1' && $this->isCurrentRequestForNonRepeatingForm();
+        }
+
+        protected function isCurrentRequestForNonRepeatingForm() {
+            if (!isset($_GET['event_id']) || !isset($_GET['page'])) {
+                return false;
+            }
+
+            global $Proj;
+            if (!isset($Proj) || !isset($Proj->eventInfo[$_GET['event_id']]) || !isset($Proj->forms[$_GET['page']])) {
+                return false;
+            }
+
+            return !$Proj->isRepeatingFormOrEvent($_GET['event_id'], $_GET['page']);
         }
 
         /**
