@@ -672,6 +672,9 @@ class InstanceTable extends AbstractExternalModule
                         $choices = parseEnum(getSqlFieldEnum($this->Proj->metadata[$fieldName]['element_enum']));
                 } else {
                         $choices = parseEnum($this->Proj->metadata[$fieldName]['element_enum']);
+                        array_walk($choices, function(&$label) {
+                                $label = preg_replace('/\{[a-z]+[a-z0-9_]*\}/','',$label); // #85 remove {embedthisvar} from choice labels
+                        });
                 }
                 
                 if (is_array($val)) {
@@ -817,7 +820,8 @@ var <?php echo self::MODULE_VARNAME;?> = (function(window, document, $, app_path
             }
             else {
                 if (taggedField.hide_form_in_menu) {
-                    $('#data-collection-menu').find('a[id*='+taggedField.form_name+']').parent('div.formMenuList').hide()
+                    $('#data-collection-menu').find('a[id*='+taggedField.form_name+']').parent('div.formMenuList').hide();
+                    $('div[data-form='+taggedField.form_name+']').hide(); // pid=16044&id=1584 selector has changed at some point
                 }
 
                 JSMO.ajax('get-data', taggedField.ajax).then(function(data) {
