@@ -602,7 +602,7 @@ class InstanceTable extends AbstractExternalModule
                         array_key_exists($eventId, $recordData[$record]['repeat_instances']) &&
                         array_key_exists($formKey, $recordData[$record]['repeat_instances'][$eventId]) ) {
                     $currentInstances = array_keys($recordData[$record]['repeat_instances'][$eventId][$formKey]);
-                    return (empty($currentInstances)) ? 1 : 1 + end($currentInstances);
+                    return (empty($currentInstances)) ? 1 : 1 + max($currentInstances); #87 use max() not end()
                 }
 
                 return 1;
@@ -1274,14 +1274,6 @@ var <?php echo self::MODULE_VARNAME;?> = (function(window, document, $, app_path
             foreach ($_GET as $key => $value) {
                 if (isset($coreParams[$key]) || is_array($value)) {
                     continue;
-                if (array_key_exists($_GET['id'],$recordData) &&
-                        array_key_exists('repeat_instances',$recordData[$_GET['id']]) &&
-                        array_key_exists($_GET['event_id'], $recordData[$_GET['id']]['repeat_instances']) &&
-                        array_key_exists($formKey, $recordData[$_GET['id']]['repeat_instances'][$_GET['event_id']]) ) {
-                    $currentInstances = array_keys($recordData[$_GET['id']]['repeat_instances'][$_GET['event_id']][$formKey]);
-                    $_GET['instance'] = (is_null($currentInstances)) ? 1 : 1 + max($currentInstances); #87 use max() not end()
-                } else {
-                    $_GET['instance'] = 1;
                 }
                 $getParams[$key] = $value;
             }
