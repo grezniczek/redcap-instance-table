@@ -752,6 +752,9 @@ class InstanceTable extends AbstractExternalModule
                         $choices = parseEnum(getSqlFieldEnum($this->Proj->metadata[$fieldName]['element_enum']));
                 } else {
                         $choices = parseEnum($this->Proj->metadata[$fieldName]['element_enum']);
+                        array_walk($choices, function(&$label) {
+                                $label = preg_replace('/\{[a-z]+[a-z0-9_]*\}/','',$label); // #85 remove {embedthisvar} from choice labels
+                        });
                 }
                 
                 if (is_array($val)) {
@@ -897,7 +900,8 @@ var <?php echo self::MODULE_VARNAME;?> = (function(window, document, $, app_path
             }
             else {
                 if (taggedField.hide_form_in_menu) {
-                    $('#data-collection-menu').find('a[id*='+taggedField.form_name+']').parent('div.formMenuList').hide()
+                    $('#data-collection-menu').find('a[id*='+taggedField.form_name+']').parent('div.formMenuList').hide();
+                    $('div[data-form='+taggedField.form_name+']').hide(); // pid=16044&id=1584 selector has changed at some point
                 }
 
                 JSMO.ajax('get-data', taggedField.ajax).then(function(data) {
@@ -1270,6 +1274,14 @@ var <?php echo self::MODULE_VARNAME;?> = (function(window, document, $, app_path
             foreach ($_GET as $key => $value) {
                 if (isset($coreParams[$key]) || is_array($value)) {
                     continue;
+                if (array_key_exists($_GET['id'],$recordData) &&
+                        array_key_exists('repeat_instances',$recordData[$_GET['id']]) &&
+                        array_key_exists($_GET['event_id'], $recordData[$_GET['id']]['repeat_instances']) &&
+                        array_key_exists($formKey, $recordData[$_GET['id']]['repeat_instances'][$_GET['event_id']]) ) {
+                    $currentInstances = array_keys($recordData[$_GET['id']]['repeat_instances'][$_GET['event_id']][$formKey]);
+                    $_GET['instance'] = (is_null($currentInstances)) ? 1 : 1 + max($currentInstances); #87 use max() not end()
+                } else {
+                    $_GET['instance'] = 1;
                 }
                 $getParams[$key] = $value;
             }
